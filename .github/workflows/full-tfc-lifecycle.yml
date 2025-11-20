@@ -10,7 +10,7 @@ on:
 env:
   TFC_ORG_NAME: mahima-test
   TFC_WORKSPACE_NAME: tfc-github-test-env
-  TFC_WORKSPACE_ID: ws-1234
+  TFC_WORKSPACE_ID: ws-De4GT4vxchbYmT2M
 
 jobs:
   plan_and_apply:
