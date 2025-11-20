@@ -20,88 +20,39 @@ jobs:
       - name: ⬇️ Checkout Repository
         uses: actions/checkout@v4
         
-      # --- 1. Create a Configuration Version in TFC ---
-      - name: 📦 Create Configuration Version
+      # --- 1. Create Configuration Version & Upload Code ---
+      - name: 📦 Create and Upload Config Version
         id: create_config_version
         env:
           TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
         run: |
           echo "Creating Configuration Version for workspace ID: ${{ env.TFC_WORKSPACE_ID }}"
           
-          # 1a. API Call to request a new Configuration Version and get the upload URL
+          # 1a. Request a new Configuration Version and get the upload URL
           CV_DATA=$(curl -s -X POST \
             --header "Authorization: Bearer $TFC_TOKEN" \
             --header "Content-Type: application/vnd.api+json" \
-            --data '{
-              "data": {
-                "type": "configuration-versions",
-                "attributes": {
-                  "auto-queue-runs": false # Don't start run automatically
-                },
-                "relationships": {
-                  "workspace": {
-                    "data": {
-                      "type": "workspaces",
-                      "id": "${{ env.TFC_WORKSPACE_ID }}"
-                    }
-                  }
-                }
-              }
-            }' \
+            --data '{"data": {"type": "configuration-versions", "attributes": {"auto-queue-runs": false}, "relationships": {"workspace": {"data": {"type": "workspaces", "id": "${{ env.TFC_WORKSPACE_ID }}"}}}}}' \
             https://app.terraform.io/api/v2/configuration-versions)
             
-          # Extract the Configuration Version ID and the Upload URL
           CV_ID=$(echo $CV_DATA | jq -r '.data.id')
           UPLOAD_URL=$(echo $CV_DATA | jq -r '.data.attributes."upload-url"')
 
           echo "CV_ID=$CV_ID" >> $GITHUB_ENV
-          echo "UPLOAD_URL=$UPLOAD_URL" >> $GITHUB_ENV
-
-          echo "Configuration Version ID: $CV_ID"
           
-      # --- 2. Upload the Code to TFC ---
-      - name: ⬆️ Upload Code (main.tf)
-        env:
-          UPLOAD_URL: ${{ env.UPLOAD_URL }}
-        run: |
-          # Create a ZIP file of the Terraform configuration
+          # 1b. Create ZIP and Upload
           zip -r terraform_config.zip . -i '*.tf' '*.tfvars'
-
-          # Upload the ZIP file to the provided URL
           curl -s -X PUT -H "Content-Type: application/octet-stream" \
             --data-binary @terraform_config.zip \
-            "${{ env.UPLOAD_URL }}"
+            "$UPLOAD_URL"
 
-      # --- 3. Create a TFC Run with the new Configuration Version ---
+      # --- 2. Create TFC Run with the new Configuration Version ---
       - name: 🚀 Create TFC Run
         id: create_run
         env:
           TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
-          CV_ID: ${{ env.CV_ID }}
         run: |
-          PAYLOAD='{
-            "data": {
-              "attributes": {
-                "message": "Run triggered by GitHub Action for commit ${{ github.sha }}",
-                "is-destroy": false
-              },
-              "relationships": {
-                "workspace": {
-                  "data": {
-                    "type": "workspaces",
-                    "id": "${{ env.TFC_WORKSPACE_ID }}"
-                  }
-                },
-                "configuration-version": {
-                  "data": {
-                    "type": "configuration-versions",
-                    "id": "${{ env.CV_ID }}"
-                  }
-                }
-              },
-              "type": "runs"
-            }
-          }'
+          PAYLOAD='{"data": {"attributes": {"message": "GA Run for commit ${{ github.sha }}", "is-destroy": false}, "relationships": {"workspace": {"data": {"type": "workspaces", "id": "${{ env.TFC_WORKSPACE_ID }}"}}, "configuration-version": {"data": {"type": "configuration-versions", "id": "${{ env.CV_ID }}"}}}, "type": "runs"}}'
           
           RUN_DATA=$(curl -s -X POST \
             --header "Authorization: Bearer $TFC_TOKEN" \
@@ -113,43 +64,69 @@ jobs:
           echo "TFC_RUN_ID=$RUN_ID" >> $GITHUB_ENV
           echo "Run ID: $RUN_ID"
           
-      # --- Steps 4 to 7 remain the same as the previous response ---
-      # 4. Wait for Plan to Complete
+      # --- 3. Wait for the Plan to Finish ---
       - name: ⏳ Wait for Plan to Complete
-        uses: benc-uk/wait-for-status-action@v4
+        uses: benc-uk/wait-for-status-action@v3 # Use v3 or later
         with:
           url: https://app.terraform.io/api/v2/runs/${{ env.TFC_RUN_ID }}
           status-key: data.attributes.status
           desired-status: planned_and_saved 
           wait-interval: 10
           timeout: 600
-      
-      # 5. Retrieve and Display PLAN Summary
+
+      # --- 4. Retrieve and Display PLAN Summary (Detailed Output) ---
       - name: 📋 Get and Display PLAN Summary
-        # ... (Same curl and jq logic as previous response to get plan summary) ...
-        # (Using a simplified echo here for brevity, assume the full logic is used)
+        id: plan_summary_display
         env:
           TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
           TFC_RUN_ID: ${{ env.TFC_RUN_ID }}
         run: |
-          # Placeholder for the actual API retrieval and parsing logic
-          echo "Run Type: Speculative Plan"
-          echo "Run Detail Endpoint: https://app.terraform.io/api/v2/runs/${{ env.TFC_RUN_ID }}"
-          echo "== PLAN =="
-          # ACTUAL API CALLS AND PARSING FROM PREVIOUS RESPONSE GO HERE
+          # 4a. Get Run Details and Extract Plan ID
+          RUN_DATA=$(curl -s --header "Authorization: Bearer $TFC_TOKEN" https://app.terraform.io/api/v2/runs/$TFC_RUN_ID)
+          PLAN_ID=$(echo "$RUN_DATA" | jq -r '.data.relationships.plan.data.id')
           
-      # 6. Confirm and Apply the TFC Run
+          # 4b. Get Plan Details and Extract Attributes
+          PLAN_ATTRIBUTES=$(curl -s --header "Authorization: Bearer $TFC_TOKEN" https://app.terraform.io/api/v2/plans/$PLAN_ID | jq -r '.data.attributes')
+
+          # 4c. Output to Action Log and Step Summary
+          echo "--- Plan Details ---"
+          echo "Run ID: $TFC_RUN_ID"
+          echo "Run Type: Speculative Plan"
+          echo "Run Detail Endpoint: https://app.terraform.io/api/v2/runs/$TFC_RUN_ID"
+          echo "== PLAN =="
+          echo "Plan Detail Endpoint: https://app.terraform.io/api/v2/plans/$PLAN_ID"
+          echo "Result:"
+          
+          # Use jq to structure the output for the log
+          echo "$PLAN_ATTRIBUTES" | jq '{
+              "resource-additions": ."resource-additions",
+              "resource-changes": ."resource-changes",
+              "resource-destructions": ."resource-destructions",
+              "resource-imports": ."resource-imports"
+          }'
+          
+          # Optional: Add to GitHub Job Summary for quick view
+          echo "## ☁️ Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "* **➕ Additions:** $(echo "$PLAN_ATTRIBUTES" | jq -r '."resource-additions"')" >> $GITHUB_STEP_SUMMARY
+          echo "* **➖ Destructions:** $(echo "$PLAN_ATTRIBUTES" | jq -r '."resource-destructions"')" >> $GITHUB_STEP_SUMMARY
+
+      # --- 5. Confirm and Apply the TFC Run ---
       - name: ✅ Confirm and Apply Run
-        # ... (Same curl logic as previous response to trigger apply) ...
+        id: apply_run
         env:
           TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
           TFC_RUN_ID: ${{ env.TFC_RUN_ID }}
         run: |
-          curl -s -X POST --header "Authorization: Bearer $TFC_TOKEN" --header "Content-Type: application/vnd.api+json" --data '{"comment": "Applied via GitHub Action"}' https://app.terraform.io/api/v2/runs/${{ env.TFC_RUN_ID }}/actions/apply
+          echo "Sending confirmation for apply to Run ID: $TFC_RUN_ID"
+          curl -s -X POST \
+            --header "Authorization: Bearer $TFC_TOKEN" \
+            --header "Content-Type: application/vnd.api+json" \
+            --data '{"comment": "Applied via GitHub Action"}' \
+            https://app.terraform.io/api/v2/runs/$TFC_RUN_ID/actions/apply
       
-      # 7. Wait for the Apply to Finish
+      # --- 6. Wait for the Apply to Finish ---
       - name: ⏳ Wait for Apply to Complete
-        uses: benc-uk/wait-for-status-action@v4
+        uses: benc-uk/wait-for-status-action@v3 # Use v3 or later
         with:
           url: https://app.terraform.io/api/v2/runs/${{ env.TFC_RUN_ID }}
           status-key: data.attributes.status
@@ -157,14 +134,38 @@ jobs:
           wait-interval: 15
           timeout: 1200
 
-      # 8. Retrieve and Display APPLY Summary
+      # --- 7. Retrieve and Display APPLY Summary (Detailed Output) ---
       - name: 📊 Get and Display APPLY Summary
-        # ... (Same curl and jq logic as previous response to get apply summary) ...
-        # (Using a simplified echo here for brevity, assume the full logic is used)
+        id: apply_summary_display
         env:
           TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
           TFC_RUN_ID: ${{ env.TFC_RUN_ID }}
         run: |
-          # Placeholder for the actual API retrieval and parsing logic
+          # 7a. Get Run Details and Extract Apply ID
+          RUN_DATA=$(curl -s --header "Authorization: Bearer $TFC_TOKEN" https://app.terraform.io/api/v2/runs/$TFC_RUN_ID)
+          APPLY_ID=$(echo "$RUN_DATA" | jq -r '.data.relationships.apply.data.id')
+
+          # 7b. Get Apply Details and Extract Attributes
+          APPLY_ATTRIBUTES=$(curl -s --header "Authorization: Bearer $TFC_TOKEN" https://app.terraform.io/api/v2/applies/$APPLY_ID | jq -r '.data.attributes')
+
+          # 7c. Output to Action Log
+          echo "--- Apply Details ---"
+          echo "Run ID: $TFC_RUN_ID"
+          echo "Run Type: Provisional Apply"
+          echo "Run Detail Endpoint: https://app.terraform.io/api/v2/runs/$TFC_RUN_ID"
           echo "== APPLY =="
-          # ACTUAL API CALLS AND PARSING FROM PREVIOUS RESPONSE GO HERE
+          echo "Plan Detail Endpoint: https://app.terraform.io/api/v2/applies/$APPLY_ID" # Note: TFC uses 'Plan Detail Endpoint' in its log structure even for apply, but the API endpoint is /applies/
+          echo "Result:"
+          
+          # Use jq to structure the output for the log, matching your desired format
+          echo "$APPLY_ATTRIBUTES" | jq '{
+              "resource-additions": ."resource-additions",
+              "resource-changes": ."resource-changes",
+              "resource-destructions": ."resource-destructions",
+              "resource-imports": ."resource-imports"
+          }'
+          
+          # Optional: Add final results to GitHub Job Summary
+          echo "## ✅ Terraform Apply Results" >> $GITHUB_STEP_SUMMARY
+          echo "* **➕ Added:** $(echo "$APPLY_ATTRIBUTES" | jq -r '."resource-additions"')" >> $GITHUB_STEP_SUMMARY
+          echo "* **➖ Destroyed:** $(echo "$APPLY_ATTRIBUTES" | jq -r '."resource-destructions"')" >> $GITHUB_STEP_SUMMARY
