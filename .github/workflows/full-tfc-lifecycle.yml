@@ -116,7 +116,7 @@ jobs:
       # --- Steps 4 to 7 remain the same as the previous response ---
       # 4. Wait for Plan to Complete
       - name: ⏳ Wait for Plan to Complete
-        uses: benc-uk/wait-for-status-action@v1
+        uses: benc-uk/wait-for-status-action@v4
         with:
           url: https://app.terraform.io/api/v2/runs/${{ env.TFC_RUN_ID }}
           status-key: data.attributes.status
@@ -149,7 +149,7 @@ jobs:
       
       # 7. Wait for the Apply to Finish
       - name: ⏳ Wait for Apply to Complete
-        uses: benc-uk/wait-for-status-action@v1
+        uses: benc-uk/wait-for-status-action@v4
         with:
           url: https://app.terraform.io/api/v2/runs/${{ env.TFC_RUN_ID }}
           status-key: data.attributes.status
