@@ -8,9 +8,11 @@ terraform {
   }
 
   # This configuration tells Terraform to use the Terraform Cloud backend
-  cloud {
-    organization = "mahima-test" # Replace with your organization name
-    workspace = "tfc-github-test-env"       # Replace with your workspace name
+  cloud { 
+    organization = "mahima-test"
+    workspaces { 
+      name = "tfc-github-test-env" 
+    } 
   }
 }
 
