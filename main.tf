@@ -11,7 +11,7 @@ terraform {
   cloud { 
     organization = "mahima-test"
     workspaces { 
-      name = "tfc-github-test-plan" 
+      name = "github-tfc-plan-test" 
     } 
   }
 }
