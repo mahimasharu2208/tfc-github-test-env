@@ -23,7 +23,7 @@ provider "aws" {
 
 # A simple resource: AWS S3 Bucket
 resource "aws_s3_bucket" "example" {
-  bucket = "tfc-github-test-bucket-new-1741" # MUST be globally unique
+  bucket = "tfc-github-test-bucket-unique-1741" # MUST be globally unique
   
   tags = {
     Name        = "Managed by TFC via GitHub Actions"
