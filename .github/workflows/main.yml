@@ -43,7 +43,7 @@ jobs:
     - name: Terraform Plan
       run: |
        terraform plan \
-           -var-file="test/test.tfvars"
+           -var-file="test.tfvars"
       
 
       # On push to "main", build or change infrastructure according to Terraform configuration files
@@ -51,5 +51,5 @@ jobs:
     - name: Terraform Apply 
       run: |
        terraform apply \
-           -var-file="test/test.tfvars" \
+           -var-file="test.tfvars" \
            -auto-approve
