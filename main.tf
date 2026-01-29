@@ -30,3 +30,10 @@ resource "aws_s3_bucket" "example" {
     Environment = "Test"
   }
 }
+
+provider "random" {}
+
+resource "random_pet" "name" {
+  length    = 5
+  separator = "-"
+}
